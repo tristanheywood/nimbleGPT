@@ -19,10 +19,10 @@ def make_qkv_param_tensor(qkv_tensor: jnp.array, n_head):
     return params
 
 
-def make_attention_param_dict(fm_attn_params: Dict, config: ConfigDict):
+def make_attention_param_dict(fm_attn_params: Dict, config: ConfigDict, prepend: str = ""):
     return {
         "Dense_0": fm_attn_params["Dense_1"],
-        "VmapSingleHeadCausalSelfAttention_0": {
+        f"Vmap{prepend}SingleHeadCausalSelfAttention_0": {
             "Dense_0": {
                 "bias": make_qkv_param_tensor(
                     fm_attn_params["Dense_0"]["bias"], config.n_head
@@ -35,10 +35,10 @@ def make_attention_param_dict(fm_attn_params: Dict, config: ConfigDict):
     }
 
 
-def make_block_param_dict(fm_block_params: Dict, config: ConfigDict):
+def make_block_param_dict(fm_block_params: Dict, config: ConfigDict, prepend: str = ""):
     return {
-        "CausalSelfAttention_0": make_attention_param_dict(
-            fm_block_params["GPT2SelfAttention_0"], config
+        f"{prepend}CausalSelfAttention_0": make_attention_param_dict(
+            fm_block_params["GPT2SelfAttention_0"], config, prepend
         ),
         **fm_block_params["GPT2MLP_0"],  # Dense_0, Dense_1
         **{
@@ -47,14 +47,14 @@ def make_block_param_dict(fm_block_params: Dict, config: ConfigDict):
     }
 
 
-def make_gpt_param_dict(fm_gpt_params: Dict, config: ConfigDict):
+def make_gpt_param_dict(fm_gpt_params: Dict, config: ConfigDict, prepend: str = ""):
     return {
         # Embed_0, Embed_1, LayerNorm_0
         **{k: v for k, v in fm_gpt_params["GPT2Model_0"].items() if "Block" not in k},
         "Dense_0": fm_gpt_params["Dense_0"],
         **{
-            f"Block_{i}": make_block_param_dict(
-                fm_gpt_params["GPT2Model_0"][f"GPT2Block_{i}"], config
+            f"{prepend}Block_{i}": make_block_param_dict(
+                fm_gpt_params["GPT2Model_0"][f"GPT2Block_{i}"], config, prepend
             )
             for i in range(config.n_layer)
         },
