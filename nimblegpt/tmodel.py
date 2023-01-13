@@ -19,27 +19,65 @@ def GELU(x):
     return 0.5 * x * (1.0 + jnp.tanh(jnp.sqrt(2.0 / jnp.pi) * (x + 0.044715 * x**3)))
 
 
-def make_softmax(block_size: int, num_warps: int = 1):
+def make_padded_softmax(block_size: int, num_warps: int = 1):
+    """
+    Returned kernel has signature:
+    def padded_softmax_kernel(att: Array[block_size, block_size], n_padd: int):
+
+    Such that `padded_softmax_kernel(att, n_padd)` only returns a correct result for
+    rows which don't correspond to padding tokens.
+    """
     # grid = block_size => one kernel instance per row of the input matrix.
     @functools.partial(
         pl.pallas_call,
         out_shape=jax.ShapeDtypeStruct((block_size, block_size), jnp.float32),
         grid=block_size,
-        num_warps = num_warps,
+        num_warps=num_warps,
     )
-    def softmax_kernel(x_ref, o_ref):
+    def padded_softmax_kernel(x_ref, p_ref, o_ref):
         row_idx = pl.program_id(0)
+        n_padd = p_ref[()]
+
         x_idx = jnp.arange(block_size)
         row_idxs = (row_idx, x_idx)
-        mask = x_idx < x_ref.shape[1]
-        row = pl.load(x_ref, row_idxs, mask=mask, other=-float("inf"))
+
+        # 1 for valid elements of `x_ref`, 0 elsewhere (i.e. out of bounds).
+        valid_mask = x_idx < x_ref.shape[1]
+
+        # Token i should only attend to tokens j <= i.
+        causal_mask = x_idx <= row_idx
+
+        # 1 in the bottom right corner of the matrix - where data tokens attend to data
+        # tokens. 0 elsewhere.
+        padd_mask = (x_idx >= n_padd) & (row_idx >= n_padd)
+
+        read_mask = valid_mask & causal_mask & padd_mask
+        row = pl.load(x_ref, row_idxs, mask=read_mask, other=-float("inf"))
+
         row_minus_max = row - jnp.max(row, axis=0)
         numerator = jnp.exp(row_minus_max)
         denominator = jnp.sum(numerator, axis=0)
         softmax_output = numerator / denominator
-        pl.store(o_ref, row_idxs, softmax_output, mask=mask)
 
-    return softmax_kernel
+        # TODO: For some reason this crashes triton.
+        # Zero out attention matrix for masked tokens.
+        # full_output = jnp.where(
+        #     causal_mask & padd_mask,
+        #     softmax_output,
+        #     jnp.zeros(
+        #         block_size,
+        #     ),
+        # )
+
+        pl.store(o_ref, row_idxs, softmax_output, mask=valid_mask)
+        # pl.store(
+        #     o_ref,
+        #     row_idxs,
+        #     jnp.zeros(block_size),
+        #     mask=valid_mask & ~causal_mask & ~padd_mask,
+        # )
+
+    return padded_softmax_kernel
 
 
 def make_2d_mask(
@@ -84,19 +122,7 @@ class TSingleHeadCausalSelfAttention(nn.Module):
         # is high when token i should attend heavily to token j.
         att = (q @ k.T) * (1.0 / jnp.sqrt(self.n_feat))
 
-        # Token i should not attend to token j for any j > i. We set att to -inf
-        # for any position above the diagonal - i.e. where j > i.
-        causal_mask = ~jnp.tril(jnp.ones((T, T))).astype(bool)
-        att = jnp.where(causal_mask, -jnp.inf, att)
-
-        # Data tokens should not attend to padding tokens. For any data token
-        # i > n_padd, set the attention values to padding tokens to -inf.
-        # Equivalent to: `att = att.at[n_padd:, :n_padd].set(-jnp.inf)`.
-        padd_mask = make_2d_mask(T, T, n_padd, T, 0, n_padd)
-        att = jnp.where(padd_mask, -jnp.inf, att)
-
-        # att = softmax(att, axis=-1)
-        att = make_softmax(T)(att)
+        att = make_padded_softmax(T)(att, n_padd)
 
         y = att @ v  # [T, T] @ [T, n_feat] -> [T, n_feat]
 
@@ -112,14 +138,18 @@ class TCausalSelfAttention(nn.Module):
         n_feat = C // self.n_head  # Features per q/k/v per head.
 
         # [T, C] -> [T, n_head, n_feat]
+        # TODO: mapping over [n_padd] * n_head is to avoid an issue in pallas.
         y = nn.vmap(
             TSingleHeadCausalSelfAttention,
-            in_axes=None,  # Don't map over `x` - each `SingleHead CausalSelfAttention` gets the full `x`.
+            in_axes=(
+                None,
+                0,
+            ),  # Don't map over `x` - each `SingleHead CausalSelfAttention` gets the full `x`.
             axis_size=self.n_head,
             out_axes=1,
             variable_axes={"params": 0},  # 0th axis of params should be the vmap axis.
             split_rngs={"params": True},
-        )(n_feat=n_feat)(x, n_padd)
+        )(n_feat=n_feat)(x, jnp.ones((self.n_head)) * n_padd)
         y = jnp.reshape(y, (T, C))  # [T, n_head, n_feat] -> [T, C]
 
         y = nn.Dense(features=C)(y)
