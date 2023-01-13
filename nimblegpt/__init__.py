@@ -5,3 +5,4 @@ from .inspect import param_shapes
 from .config import get_config_for
 from .bpe import get_encoder
 from .generate import sample_token
+from .jgenerate import jitted_text_generator
