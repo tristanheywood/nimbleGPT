@@ -8,6 +8,7 @@ from absl.testing import absltest
 from nimblegpt import get_config_for
 from nimblegpt.model import SingleHeadCausalSelfAttention
 from nimblegpt.jmodel import JSingleHeadCausalSelfAttention
+from nimblegpt.shcsa_kernels import PaddedSHCSA, PaddedSoftmaxSHCSA, PaddedSoftmaxVSHCSA
 
 
 class SingleHeadedAttentionTest(absltest.TestCase):
@@ -47,6 +48,45 @@ class SingleHeadedAttentionTest(absltest.TestCase):
 
         # Not sure why difference is non-zero - possibly due to numerics in the softmax.
         assert (jy - pjy[self.n_padd :]).max() <= 1e-6
+
+    def test_padded_softmax_shcsa(self):
+
+        y, _ = SingleHeadCausalSelfAttention(self.n_feat).init_with_output(
+            self.rng, self.x
+        )
+        ky, _ = PaddedSoftmaxSHCSA(self.n_feat).init_with_output(self.rng, self.x)
+        pky, _ = PaddedSoftmaxSHCSA(self.n_feat).init_with_output(
+            self.rng, self.padded_x, n_padd=self.n_padd
+        )
+
+        assert (y - ky).max() == 0
+        assert (ky - pky[self.n_padd :]).max() < 1e-6
+
+    def test_padded_softmax_v_shcsa(self):
+
+        y, _ = SingleHeadCausalSelfAttention(self.n_feat).init_with_output(
+            self.rng, self.x
+        )
+        ky, _ = PaddedSoftmaxVSHCSA(self.n_feat).init_with_output(self.rng, self.x)
+        pky, _ = PaddedSoftmaxVSHCSA(self.n_feat).init_with_output(
+            self.rng, self.padded_x, n_padd=self.n_padd
+        )
+
+        assert (y - ky).max() < 1e-6
+        assert (ky - pky[self.n_padd :]).max() < 1e-6
+
+    def test_padded_shcsa(self):
+
+        y, _ = SingleHeadCausalSelfAttention(self.n_feat).init_with_output(
+            self.rng, self.x
+        )
+        ky, _ = PaddedSHCSA(self.n_feat).init_with_output(self.rng, self.x)
+        pky, _ = PaddedSHCSA(self.n_feat).init_with_output(
+            self.rng, self.padded_x, n_padd=self.n_padd
+        )
+
+        assert (y - ky).max() < 1e-6
+        assert (y - pky[self.n_padd: ]).max() < 1e-6
 
 
 if __name__ == "__main__":
