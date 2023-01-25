@@ -2,7 +2,6 @@
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 from absl.testing import absltest
 
 from nimblegpt import get_config_for
@@ -33,8 +32,12 @@ class SingleHeadedAttentionTest(absltest.TestCase):
         jy, _ = JSingleHeadCausalSelfAttention(self.n_feat).init_with_output(
             self.rng, self.x
         )
+        jit_jy, _ = jax.jit(
+            JSingleHeadCausalSelfAttention(self.n_feat).init_with_output
+        )(self.rng, self.x)
 
         assert (y - jy).max() == 0
+        assert (y - jit_jy).max() < 1e-5
 
     def test_jmodel_padding(self):
         """Test that jmodel produces the same outputs with and without padding tokens."""
@@ -45,9 +48,13 @@ class SingleHeadedAttentionTest(absltest.TestCase):
         pjy, _ = JSingleHeadCausalSelfAttention(self.n_feat).init_with_output(
             self.rng, self.padded_x, n_padd=self.n_padd
         )
+        jit_pjy, _ = jax.jit(
+            JSingleHeadCausalSelfAttention(self.n_feat).init_with_output
+        )(self.rng, self.padded_x, n_padd=self.n_padd)
 
         # Not sure why difference is non-zero - possibly due to numerics in the softmax.
         assert (jy - pjy[self.n_padd :]).max() <= 1e-6
+        assert (jy - jit_pjy[self.n_padd :]).max() <= 1e-6
 
     def test_padded_softmax_shcsa(self):
 
@@ -58,9 +65,13 @@ class SingleHeadedAttentionTest(absltest.TestCase):
         pky, _ = PaddedSoftmaxSHCSA(self.n_feat).init_with_output(
             self.rng, self.padded_x, n_padd=self.n_padd
         )
+        jit_pky, _ = jax.jit(
+            PaddedSoftmaxSHCSA(self.n_feat).init_with_output
+        )(self.rng, self.padded_x, n_padd=self.n_padd)
 
         assert (y - ky).max() == 0
         assert (ky - pky[self.n_padd :]).max() < 1e-6
+        assert (ky - jit_pky[self.n_padd :]).max() < 1e-6
 
     def test_padded_softmax_v_shcsa(self):
 
@@ -71,9 +82,13 @@ class SingleHeadedAttentionTest(absltest.TestCase):
         pky, _ = PaddedSoftmaxVSHCSA(self.n_feat).init_with_output(
             self.rng, self.padded_x, n_padd=self.n_padd
         )
+        jit_pky, _ = jax.jit(
+            PaddedSoftmaxVSHCSA(self.n_feat).init_with_output
+        )(self.rng, self.padded_x, n_padd=self.n_padd)
 
         assert (y - ky).max() < 1e-6
         assert (ky - pky[self.n_padd :]).max() < 1e-6
+        assert (ky - jit_pky[self.n_padd :]).max() < 1e-6
 
     def test_padded_shcsa(self):
 
@@ -84,9 +99,13 @@ class SingleHeadedAttentionTest(absltest.TestCase):
         pky, _ = PaddedSHCSA(self.n_feat).init_with_output(
             self.rng, self.padded_x, n_padd=self.n_padd
         )
+        jit_pky, _ = jax.jit(PaddedSHCSA(self.n_feat).init_with_output)(
+            self.rng, self.padded_x, n_padd=self.n_padd
+        )
 
         assert (y - ky).max() < 1e-6
-        assert (y - pky[self.n_padd: ]).max() < 1e-6
+        assert (y - pky[self.n_padd :]).max() < 1e-6
+        assert (y - jit_pky[self.n_padd :]).max() < 1e-6
 
 
 if __name__ == "__main__":
