@@ -1,3 +1,7 @@
+"""Re-implementation of `model` to allow jitted text generation. This requires a fixed
+sized input, which requires padding tokens. The padding tokens must be masked out during
+attention, so that the model produces the same output with and without padding tokens."""
+
 from typing import Optional, Tuple, Union
 
 import jax
@@ -5,6 +9,13 @@ import jax.numpy as jnp
 from flax import linen as nn
 from jax import lax
 from ml_collections import ConfigDict
+
+from nimblegpt.base_model import (
+    BaseBlock,
+    BaseCausalSelfAttention,
+    BaseGPT,
+    BaseSingleHeadCausalSelfAttention,
+)
 
 
 def GELU(x):
@@ -14,7 +25,8 @@ def GELU(x):
     Implementation of the GELU activation function currently in Google BERT repo (identical to OpenAI GPT).
     Reference: Gaussian Error Linear Units (GELU) paper: https://arxiv.org/abs/1606.08415
     """
-    return 0.5 * x * (1.0 + jnp.tanh(jnp.sqrt(2.0 / jnp.pi) * (x + 0.044715 * x**3)))
+    return 0.5 * x * (1.0 +
+                      jnp.tanh(jnp.sqrt(2.0 / jnp.pi) * (x + 0.044715 * x**3)))
 
 
 # Copied from https://jax.readthedocs.io/en/latest/_modules/jax/_src/nn/functions.html#softmax
@@ -42,12 +54,12 @@ def softmax(
     """
     x_max = jnp.max(x, axis, where=where, initial=-jnp.inf, keepdims=True)
     unnormalized = jnp.exp(x - lax.stop_gradient(x_max))
-    return unnormalized / jnp.sum(unnormalized, axis, where=where, keepdims=True)
+    return unnormalized / jnp.sum(
+        unnormalized, axis, where=where, keepdims=True)
 
 
-def make_2d_mask(
-    n_row: int, n_col: int, row_start: int, row_stop: int, col_start: int, col_stop: int
-):
+def make_2d_mask(n_row: int, n_col: int, row_start: int, row_stop: int,
+                 col_start: int, col_stop: int):
     """
     Equivalent to
     ```
@@ -62,7 +74,7 @@ def make_2d_mask(
     return row_mask & col_mask
 
 
-class JSingleHeadCausalSelfAttention(nn.Module):
+class JSingleHeadCausalSelfAttention(BaseSingleHeadCausalSelfAttention):
     """
     Inference only (no dropout) single headed attention.
 
@@ -72,7 +84,6 @@ class JSingleHeadCausalSelfAttention(nn.Module):
     It is possible to use torch.nn.MultiheadAttention here but I am including an
     explicit implementation here to show that there is nothing too scary here.
     """
-
     n_feat: int
 
     @nn.compact
@@ -105,7 +116,7 @@ class JSingleHeadCausalSelfAttention(nn.Module):
         return y
 
 
-class JCausalSelfAttention(nn.Module):
+class JCausalSelfAttention(BaseCausalSelfAttention):
     n_head: int
 
     @nn.compact
@@ -116,10 +127,12 @@ class JCausalSelfAttention(nn.Module):
         # [T, C] -> [T, n_head, n_feat]
         y = nn.vmap(
             JSingleHeadCausalSelfAttention,
-            in_axes=None,  # Don't map over `x` - each `SingleHead CausalSelfAttention` gets the full `x`.
+            in_axes=
+            None,  # Don't map over `x` - each `SingleHead CausalSelfAttention` gets the full `x`.
             axis_size=self.n_head,
             out_axes=1,
-            variable_axes={"params": 0},  # 0th axis of params should be the vmap axis.
+            variable_axes={"params":
+                           0},  # 0th axis of params should be the vmap axis.
             split_rngs={"params": True},
         )(n_feat=n_feat)(x, n_padd)
         y = jnp.reshape(y, (T, C))  # [T, n_head, n_feat] -> [T, C]
@@ -128,7 +141,7 @@ class JCausalSelfAttention(nn.Module):
         return y
 
 
-class JBlock(nn.Module):
+class JBlock(BaseBlock):
     n_head: int
 
     @nn.compact
@@ -149,7 +162,7 @@ class JBlock(nn.Module):
         return x
 
 
-class JGPT(nn.Module):
+class JGPT(BaseGPT):
     C: ConfigDict
 
     @nn.compact
@@ -163,19 +176,17 @@ class JGPT(nn.Module):
         n_padd : int
             Number of padding tokens before the data tokens in `indices`.
         """
-        (T,) = indices.shape  # One index per token in the sequence.
+        (T, ) = indices.shape  # One index per token in the sequence.
 
         # Rotate positions so that first non-padding token has position 0.
         pos = (jnp.arange(0, T) - n_padd) % self.C.block_size
 
         # Token embeddings of shape [T, n_embd].
-        tok_emb = nn.Embed(num_embeddings=self.C.vocab_size, features=self.C.n_embd)(
-            indices
-        )
+        tok_emb = nn.Embed(num_embeddings=self.C.vocab_size,
+                           features=self.C.n_embd)(indices)
         # Position embeddings of shape [T, n_embd].
-        pos_emb = nn.Embed(num_embeddings=self.C.block_size, features=self.C.n_embd)(
-            pos
-        )
+        pos_emb = nn.Embed(num_embeddings=self.C.block_size,
+                           features=self.C.n_embd)(pos)
 
         x = tok_emb + pos_emb
 
