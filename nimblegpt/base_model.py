@@ -12,7 +12,7 @@ In all cases, `x` is the tensor of token embeddings, of shape
 
 import abc
 from functools import partial
-from typing import Any
+from typing import Any, Optional
 
 import flax.linen as nn
 import jax
@@ -50,7 +50,7 @@ class BaseSingleHeadCausalSelfAttention(CustomPrefixModule, abc.ABC):
     n_feat: int
 
     @abc.abstractmethod
-    def __call__(self, x, n_padd: int = 0):
+    def __call__(self, x, seq_len: int):
         pass
 
 
@@ -60,7 +60,7 @@ class BaseCausalSelfAttention(CustomPrefixModule, abc.ABC):
     n_head: int
 
     @abc.abstractmethod
-    def __call__(self, x, n_padd: int = 0):
+    def __call__(self, x, seq_len: int):
         pass
 
 
@@ -70,7 +70,7 @@ class BaseBlock(CustomPrefixModule, abc.ABC):
     n_head: int
 
     @abc.abstractmethod
-    def __call__(self, x, n_padd: int = 0):
+    def __call__(self, x, seq_len: int):
         pass
 
 
@@ -80,14 +80,17 @@ class BaseGPT(CustomPrefixModule, abc.ABC):
     C: ConfigDict
 
     @abc.abstractmethod
-    def __call__(self, indices: jax.Array, n_padd: int = 0):
+    def __call__(self, indices: jax.Array, seq_len: Optional[int] = None):
         """
         Parameters
         ----------
         indicies : jnp.ndarray
             Array of token indices of shape (T,). See 'bpe.py' for how text is converted
             into indices.
-        n_padd : int
-            Number of padding tokens before the data tokens in `indices`.
+        seq_len : Optional[int]
+            Current length of the data token sequence. `indices[seq_len:]` is padding.
+            `seq_len` is not required because causal masking ensures that data tokens
+            do not attend to padding tokens. It can optionally be used to speed up
+            computation by avoiding unnecessary computation on padding tokens.
         """
         pass
