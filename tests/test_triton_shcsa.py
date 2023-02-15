@@ -6,7 +6,7 @@ from absl.testing import absltest
 
 from nimblegpt import get_config_for
 from nimblegpt.model import SingleHeadCausalSelfAttention
-from nimblegpt.triton_shcsa_kernels import (
+from nimblegpt.kernels.triton_shcsa_kernels import (
     SHCSATritonSoftmax,
     SHCSATritonPaddedSoftmax,
     SHCSATritonPaddedSoftmaxV,

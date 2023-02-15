@@ -87,8 +87,8 @@ class JSingleHeadCausalSelfAttention(BaseSingleHeadCausalSelfAttention):
     n_feat: int
 
     @nn.compact
-    def __call__(self, x, n_padd: int = 0):
-        T, C = x.shape  # sequence length, embedding dimensionality (n_embd)
+    def __call__(self, x, seq_len: int):
+        T, C = x.shape  # context length, embedding dimensionality (n_embd)
 
         # [T, C] @ [C, 3 * n_feat] -> [T, 3 * n_feat] -> 3 * [T, n_feat]
         q, k, v = jnp.split(nn.Dense(features=3 * self.n_feat)(x), 3, axis=1)
@@ -100,14 +100,9 @@ class JSingleHeadCausalSelfAttention(BaseSingleHeadCausalSelfAttention):
 
         # Token i should not attend to token j for any j > i. We set att to -inf
         # for any position above the diagonal - i.e. where j > i.
+        # Note that this also prevents data tokens from attending to padding tokens.
         causal_mask = ~jnp.tril(jnp.ones((T, T))).astype(bool)
         att = jnp.where(causal_mask, -jnp.inf, att)
-
-        # Data tokens should not attend to padding tokens. For any data token
-        # i > n_padd, set the attention values to padding tokens to -inf.
-        # Equivalent to: `att = att.at[n_padd:, :n_padd].set(-jnp.inf)`.
-        padd_mask = make_2d_mask(T, T, n_padd, T, 0, n_padd)
-        att = jnp.where(padd_mask, -jnp.inf, att)
 
         att = softmax(att, axis=-1)
 
@@ -120,7 +115,7 @@ class JCausalSelfAttention(BaseCausalSelfAttention):
     n_head: int
 
     @nn.compact
-    def __call__(self, x, n_padd: int = 0):
+    def __call__(self, x, seq_len: int):
         T, C = x.shape  # sequence length, embedding dimensionality (n_embd)
         n_feat = C // self.n_head  # Features per q/k/v per head.
 
@@ -134,7 +129,7 @@ class JCausalSelfAttention(BaseCausalSelfAttention):
             variable_axes={"params":
                            0},  # 0th axis of params should be the vmap axis.
             split_rngs={"params": True},
-        )(n_feat=n_feat)(x, n_padd)
+        )(n_feat=n_feat)(x, seq_len)
         y = jnp.reshape(y, (T, C))  # [T, n_head, n_feat] -> [T, C]
 
         y = nn.Dense(features=C)(y)
@@ -145,11 +140,11 @@ class JBlock(BaseBlock):
     n_head: int
 
     @nn.compact
-    def __call__(self, x, n_padd: int = 0):
+    def __call__(self, x, seq_len: int):
         T, C = x.shape  # Sequence length, embedding dimensionality.
 
         y = nn.LayerNorm()(x)
-        y = JCausalSelfAttention(n_head=self.n_head)(y, n_padd=n_padd)
+        y = JCausalSelfAttention(n_head=self.n_head)(y, seq_len)
         x = x + y
 
         y = nn.LayerNorm()(x)
@@ -166,32 +161,30 @@ class JGPT(BaseGPT):
     C: ConfigDict
 
     @nn.compact
-    def __call__(self, indices, n_padd: int = 0):
+    def __call__(self, indices, seq_len: Optional[int] = None):
         """
         Parameters
         ----------
         indicies : jnp.ndarray
             Array of token indices of shape (T,). See 'bpe.py' for how text is converted
             into indices.
-        n_padd : int
-            Number of padding tokens before the data tokens in `indices`.
+        seq_len : int
+            Current length of the data token sequence. `indices[seq_len:]` is padding.
         """
         (T, ) = indices.shape  # One index per token in the sequence.
 
-        # Rotate positions so that first non-padding token has position 0.
-        pos = (jnp.arange(0, T) - n_padd) % self.C.block_size
 
         # Token embeddings of shape [T, n_embd].
         tok_emb = nn.Embed(num_embeddings=self.C.vocab_size,
                            features=self.C.n_embd)(indices)
         # Position embeddings of shape [T, n_embd].
         pos_emb = nn.Embed(num_embeddings=self.C.block_size,
-                           features=self.C.n_embd)(pos)
+                           features=self.C.n_embd)(indices)
 
         x = tok_emb + pos_emb
 
         for _ in range(self.C.n_layer):
-            x = JBlock(n_head=self.C.n_head)(x, n_padd=n_padd)
+            x = JBlock(n_head=self.C.n_head)(x, seq_len)
 
         x = nn.LayerNorm()(x)
         logits = nn.Dense(features=self.C.vocab_size, use_bias=False)(x)

@@ -7,7 +7,7 @@ from absl.testing import absltest
 from nimblegpt import get_config_for
 from nimblegpt.model import SingleHeadCausalSelfAttention
 from nimblegpt.jmodel import JSingleHeadCausalSelfAttention
-from nimblegpt.shcsa_kernels import PaddedSHCSA, PaddedSoftmaxSHCSA, PaddedSoftmaxVSHCSA
+from nimblegpt.kernels.shcsa_kernels import PaddedSHCSA, PaddedSoftmaxSHCSA, PaddedSoftmaxVSHCSA
 
 
 class SingleHeadedAttentionTest(absltest.TestCase):
