@@ -2,3 +2,4 @@ flax
 jax
 ml-collections
 regex
+git+https://github.com/matthias-wright/flaxmodels.git

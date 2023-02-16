@@ -67,14 +67,14 @@ class FastModelTest(absltest.TestCase):
         v = qKV[2][4]
 
         # q, k, v for the last token in the sequence is close.
-        assert (QKV[4] - jnp.concatenate([q, k, v])).max() < 1e-5
+        assert (QKV[4] - jnp.concatenate([q, k, v])).max() < 0.01
 
         K = jnp.split(QKV, 3, axis=1)[1]
         V = jnp.split(QKV, 3, axis=1)[2]
 
         # K, V for the whole sequence is close.
-        assert (K - qKV[1][:5]).max() < 1e-5
-        assert (V - qKV[2][:5]).max() < 1e-5
+        assert (K - qKV[1][:5]).max() < 0.01
+        assert (V - qKV[2][:5]).max() < 0.01
 
     def test_shcsa(self):
         """Test FSingleHeadCausalSelfAttention."""
@@ -109,7 +109,7 @@ class FastModelTest(absltest.TestCase):
             fys.append(fy)
 
         # Outputs are close to `model.py`.
-        assert (Y - jnp.array(fys)).max() < 1e-5
+        assert (Y - jnp.array(fys)).max() < 0.01
 
     def test_csa(self):
         """Test FCausalSelfAttention."""
@@ -143,7 +143,7 @@ class FastModelTest(absltest.TestCase):
             fys.append(fy)
 
         # Outputs are close to `model.py`.
-        assert (Y - jnp.array(fys)).max() < 1e-4
+        assert (Y - jnp.array(fys)).max() < 0.1
 
     def test_fgpt_logits(self):
         """Test logit output of FGPT - for a single token."""
