@@ -10,3 +10,4 @@ setup(name='nimbleGPT',
             'jax',
       ],
 )
+      

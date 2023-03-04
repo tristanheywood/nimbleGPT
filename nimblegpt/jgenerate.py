@@ -1,11 +1,13 @@
 """Utilities jitted text generating with nimbleGPT."""
 
+from typing import Callable, Tuple
+
+import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
-from typing import Callable, Tuple
-from jax.random import KeyArray
 from jax import Array
+from jax.random import KeyArray
 
 from .bpe import get_encoder
 from .jmodel import JGPT
@@ -25,7 +27,7 @@ def sample_token(rng, logits: jnp.array, temperature=1.0, top_k=40):
 
 
 def jitted_text_generator(
-    config, params=None, temperature=1.0, top_k=40
+    config, module: nn.Module = JGPT, params=None, temperature=1.0, top_k=40
 ) -> Callable[[KeyArray, Array, int], Array]:
     """
     Creates a function with the signature:
@@ -49,7 +51,7 @@ def jitted_text_generator(
         def body(i: int, rng_and_tok_idxs: Tuple[KeyArray, Array]):
             rng, tok_idxs = rng_and_tok_idxs
 
-            logits = JGPT(config).apply(params, tok_idxs, n_padd=n_padd + i)
+            logits = module(config).apply(params, tok_idxs, n_padd=n_padd + i)
             next_tok_idx = sample_token(
                 rng, logits[-1], temperature=temperature, top_k=top_k
             )

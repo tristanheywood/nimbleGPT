@@ -111,6 +111,7 @@ def shcsa_block_kernel(
         # block of `V`` to compute a [SUBFEAT_SIZE,] partial-result block of `out.`
 
         # Index io tokens of the sequence which are processed in this block.
+        # TODO: this should probably be subseq_i * SUBSEQ_SIZE.
         subseq_idxs = tl.arange(0, SUBSEQ_SIZE) + subseq_i
         # Causal mask for sequence tokens in this block.
         subseq_mask = subseq_idxs <= seq_idx
